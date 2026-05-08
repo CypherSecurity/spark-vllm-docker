@@ -1,97 +1,58 @@
---- qwen3_5.py.orig	2026-05-08 00:19:28.800878801 +0100
-+++ qwen3_5.py	2026-05-08 00:39:06.823951777 +0100
-@@ -25,6 +25,7 @@
- """Inference-only Qwen3.5 Series compatible with HuggingFace weights."""
- 
- import typing
-+from vllm.distributed import get_tensor_model_parallel_rank, get_tensor_model_parallel_world_size
- from collections.abc import Callable, Iterable
- 
- import torch
-@@ -43,6 +44,7 @@
- from vllm.model_executor.layers.linear import (
-     ColumnParallelLinear,
-     MergedColumnParallelLinear,
-+    ReplicatedLinear,
- )
- from vllm.model_executor.layers.logits_processor import LogitsProcessor
- from vllm.model_executor.layers.mamba.mamba_utils import (
-@@ -121,6 +123,42 @@
-         return self.ctx.get_hf_config(Qwen3_5MoeConfig)
- 
- 
-+
-+class ReplicatedBAProj(torch.nn.Module):
-+    """Marlin TP=4 fix wrapper for Qwen3.5 in_proj_ba.
-+
-+    Qwen3.5 packs in_proj_b and in_proj_a (each [hidden_size, num_v_heads])
-+    into MergedColumnParallelLinear with output_sizes=[num_v_heads]*2.
-+    At TP=4 with num_v_heads=64, per-rank output = 128/4 = 32, which violates
-+    Marlin's min_thread_n=64.
-+
-+    This wrapper uses two ReplicatedLinear modules (no TP shard, no Marlin
-+    constraint), and slices outputs to local TP partition in forward.
-+    Exposes the same callable interface and .output_sizes attribute so the
-+    upstream gdn_in_proj custom op and forward() code work unchanged.
-+    """
-+
-+    def __init__(self, in_proj_b, in_proj_a, num_v_heads, tp_size, tp_rank):
-+        super().__init__()
-+        self.in_proj_b = in_proj_b
-+        self.in_proj_a = in_proj_a
-+        self.output_sizes = [num_v_heads, num_v_heads]
-+        self._tp_size = tp_size
-+        self._tp_rank = tp_rank
-+        self._chunk = num_v_heads // tp_size
-+
-+    def forward(self, hidden_states):
-+        b_full, _ = self.in_proj_b(hidden_states)
-+        a_full, _ = self.in_proj_a(hidden_states)
-+        start = self._tp_rank * self._chunk
-+        end = start + self._chunk
-+        ba = torch.cat([
-+            b_full[:, start:end],
-+            a_full[:, start:end],
-+        ], dim=-1)
-+        return ba, None
-+
-+
- class Qwen3_5GatedDeltaNet(Qwen3NextGatedDeltaNet):
-     def fix_query_key_value_ordering(
-         self,
-@@ -187,16 +225,28 @@
-         num_v_heads: int,
-         quant_config: QuantizationConfig | None,
-         prefix: str,
--    ) -> MergedColumnParallelLinear:
--        # Qwen3.5 has separate in_proj_b and in_proj_a weights in the
--        # checkpoint, which are loaded into the fused in_proj_ba parameter
--        # via stacked_params_mapping with shard_id 0 and 1 respectively.
--        return MergedColumnParallelLinear(
-+    ):
-+        """Marlin TP=4 fix: ReplicatedBAProj wrapper instead of
-+        MergedColumnParallelLinear, to avoid min_thread_n=64 violation."""
-+        parent_prefix = prefix.rsplit(".", 1)[0]
-+        in_proj_b = ReplicatedLinear(
+--- model_executor/models/qwen3_5.py	2026-05-08 17:08:51.662657712 +0100
++++ model_executor/models/qwen3_5.py	2026-05-08 17:08:51.662808704 +0100
+@@ -191,14 +191,45 @@
+         # Qwen3.5 has separate in_proj_b and in_proj_a weights in the
+         # checkpoint, which are loaded into the fused in_proj_ba parameter
+         # via stacked_params_mapping with shard_id 0 and 1 respectively.
++        # disable_tp=True: replicate across TP ranks (output=128 satisfies
++        # Marlin min_thread_n=64; sharded TP=4 would give 32 which fails).
+         return MergedColumnParallelLinear(
              input_size=hidden_size,
--            output_sizes=[num_v_heads] * 2,
-+            output_size=num_v_heads,
+             output_sizes=[num_v_heads] * 2,
              bias=False,
              quant_config=quant_config,
--            prefix=prefix,
-+            prefix=f"{parent_prefix}.in_proj_b",
-+        )
-+        in_proj_a = ReplicatedLinear(
-+            input_size=hidden_size,
-+            output_size=num_v_heads,
-+            bias=False,
-+            quant_config=quant_config,
-+            prefix=f"{parent_prefix}.in_proj_a",
-+        )
-+        return ReplicatedBAProj(
-+            in_proj_b, in_proj_a, num_v_heads,
-+            get_tensor_model_parallel_world_size(),
-+            get_tensor_model_parallel_rank(),
+             prefix=prefix,
++            disable_tp=True,
          )
  
++    def _slice_ba_to_local(self, ba_full):
++        """Slice replicated ba output [batch, 128] to local TP chunk [batch, 32]."""
++        from vllm.distributed import (
++            get_tensor_model_parallel_rank,
++            get_tensor_model_parallel_world_size,
++        )
++        tp_rank = get_tensor_model_parallel_rank()
++        tp_size = get_tensor_model_parallel_world_size()
++        output_sizes = self.in_proj_ba.output_sizes
++        offset = output_sizes[0]
++        chunk_b = output_sizes[0] // tp_size
++        chunk_a = output_sizes[1] // tp_size
++        b_local = ba_full[..., tp_rank * chunk_b:(tp_rank + 1) * chunk_b]
++        a_local = ba_full[..., offset + tp_rank * chunk_a:offset + (tp_rank + 1) * chunk_a]
++        return torch.cat([b_local, a_local], dim=-1)
++
++    def _forward_in_proj(self, hidden_states):
++        """Override parent to slice replicated ba output."""
++        from vllm.utils.multi_stream_utils import maybe_execute_in_parallel
++        projected_states_qkvz, projected_states_ba_full = maybe_execute_in_parallel(
++            lambda: self.in_proj_qkvz(hidden_states)[0],
++            lambda: self.in_proj_ba(hidden_states)[0],
++            self.events[0],
++            self.events[1],
++            self.aux_stream,
++        )
++        return projected_states_qkvz, self._slice_ba_to_local(projected_states_ba_full)
++
      def forward(
+         self,
+         hidden_states: torch.Tensor,
+@@ -218,7 +249,8 @@
+         if hasattr(self, "in_proj_qkv"):
+             # LoRA path: separate in_proj_qkv and in_proj_z
+             mixed_qkv, _ = self.in_proj_qkv(hidden_states)
+-            ba, _ = self.in_proj_ba(hidden_states)
++            ba_full, _ = self.in_proj_ba(hidden_states)
++            ba = self._slice_ba_to_local(ba_full)
+             z, _ = self.in_proj_z(hidden_states)
+         else:
+             mixed_qkvz, ba = torch.ops.vllm.gdn_in_proj(
