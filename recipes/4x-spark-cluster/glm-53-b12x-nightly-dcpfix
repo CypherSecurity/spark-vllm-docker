@@ -1,0 +1,103 @@
+recipe_version: "1"
+# RESULT 2026-09-09 17:25: WORKS on the full model. Coherent output, MTP accept 3.1/4 (code).
+# step 122-127 ms; code 32 / prose 20 / count 39 tok/s; decode@32K 33.6 tok/s; 30K cold prefill
+# 803 tok/s; KV pool 584,704 tokens at 8 GB. (eldritch v2: 140 ms, 27/17/36, 25.7, ~500, 657K@9GB)
+# ATTEMPT 5 2026-09-09: DCP=4 on the nightly stack with the ROOT-CAUSE fix.
+# Root cause (found with the 6-layer harness, recipes glm-53-mini6-dcp1/dcp4):
+#   vllm/models/deepseek_v32/common/kernels.py::fused_norm_rope treats a negative slot
+#   as padding and skips the whole row; under plain DCP the slot mapping is -1 for every
+#   token this rank does not own, so q_c/kv_c/k_pe were ZERO for 3/4 of the rows on every
+#   rank. mods/fix-dsv32-dcp-combine now (a) computes those rows and skips only the cache
+#   stores (COMPUTE_UNOWNED constexpr), (b) adds the plain-DCP query gather + LSE combine
+#   to the DSA attention path, (c) opens the b12x full-CKV-gather prefill path to
+#   glm_moe_dsa (VLLM_B12X_MLA_CKV_GATHER{,_DSA}=1) so prefill never depends on the
+#   extend-plan LSE. Mini-model parity vs DCP=1: q_c identical on all ranks, attention out
+#   within 0.3% (L0) / 1.3% (L3), prefill logprobs mean diff 0.02 (was 0.8).
+# Memory: first boot keeps gmu 0.86 / KV 8 GB (584K pool). Restore 0.88 / 9 GB after.
+#   cd ~/spark-vllm-docker && ./run-recipe.py recipes/4x-spark-cluster/glm-53-b12x-nightly-dcpfix --no-ray
+name: GLM-5.3-b12x-nightly-dcpfix
+description: "GLM-5.3 Int4-Int8Mix on eugr/spark-vllm-b12x nightly-20260908, TP4+DCP4 with mods/fix-dsv32-dcp-combine (kernel + attention + CKV-gather), MTP4, RoCEnante, 327K ctx."
+
+model: /models/GLM-5.3-Tech2wild
+container: eugr/spark-vllm-b12x:nightly-20260908
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 4
+  gpu_memory_utilization: 0.86
+  max_model_len: 327680
+  max_num_batched_tokens: 8192
+
+env:
+  NCCL_NET: IB
+  NCCL_IB_DISABLE: "0"
+  NCCL_IB_HCA: "mlx5_0,mlx5_2"
+  NCCL_SOCKET_IFNAME: "enP7s7,enp1s0f0np0,enP2p1s0f0np0"
+  GLOO_SOCKET_IFNAME: "enp1s0f0np0"
+  NCCL_IB_GID_INDEX: "-1"
+  NCCL_MAX_NCHANNELS: "4"
+  NCCL_MIN_NCHANNELS: "4"
+  NCCL_CUMEM_ENABLE: "0"
+  NCCL_CROSS_NIC: "1"
+  NCCL_IGNORE_CPU_AFFINITY: "1"
+  NCCL_BUFFSIZE: "16777216"
+
+  # b12x one-shot RoCE collectives (multi-node TP). HCAs come from NCCL_IB_HCA.
+  VLLM_ENABLE_ROCE_ALLREDUCE: "1"
+  # prefill via full-CKV gather (opened to glm_moe_dsa by the mod)
+  VLLM_B12X_MLA_CKV_GATHER: "1"
+  VLLM_B12X_MLA_CKV_GATHER_DSA: "1"
+  VLLM_B12X_MLA_CKV_GATHER_MAX_TOKENS: "524288"
+  VLLM_ROCE_ALLREDUCE_MAX_SIZE: "2MB"
+  VLLM_ENABLE_PCIE_ALLREDUCE: "0"
+
+  CUTE_DSL_ARCH: "sm_121a"
+  VLLM_USE_V2_MODEL_RUNNER: "1"
+  VLLM_USE_AOT_COMPILE: "1"
+  VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "256"
+  VLLM_MARLIN_USE_ATOMIC_ADD: "1"
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+  VLLM_WORKER_MULTIPROC_METHOD: "spawn"
+  CUDA_DEVICE_MAX_CONNECTIONS: "32"
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+  OMP_NUM_THREADS: "8"
+  TORCH_CUDA_ARCH_LIST: "12.1a"
+
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+  VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "1800"
+
+command: |
+  export B12X_ROCE_GID_INDEX=$(for i in 0 1 2 3 4 5 6 7; do g=$(cat /sys/class/infiniband/mlx5_0/ports/1/gids/$i 2>/dev/null); t=$(cat /sys/class/infiniband/mlx5_0/ports/1/gid_attrs/types/$i 2>/dev/null); case "$g" in *:ffff:*) [ "$t" = "RoCE v2" ] && {{ echo $i; break; }};; esac; done)
+  echo "[recipe] B12X_ROCE_GID_INDEX=$B12X_ROCE_GID_INDEX on $(hostname)"
+  vllm serve /models/GLM-5.3-Tech2wild \
+    --served-model-name glm5.3 \
+    --quantization compressed-tensors \
+    --tensor-parallel-size 4 \
+    --decode-context-parallel-size 4 \
+    --dcp-comm-backend ag_rs \
+    --attention-backend B12X \
+    --speculative-config '{{"method":"mtp","num_speculative_tokens":4,"attention_backend":"B12X","quantization":"compressed-tensors"}}' \
+    --kv-cache-dtype fp8_ds_mla \
+    --kv-cache-memory-bytes 8000000000 \
+    --max-model-len 327680 \
+    --max-num-batched-tokens 8192 \
+    --max-num-seqs 4 \
+    --compilation-config '{{"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"]}}' \
+    --max-cudagraph-capture-size 32 \
+    --async-scheduling \
+    --long-prefill-token-threshold 2048 \
+    --gpu-memory-utilization 0.86 \
+    --hf-overrides '{{"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}}' \
+    --host {host} \
+    --port {port} \
+    --trust-remote-code \
+    --reasoning-parser glm45 \
+    --tool-call-parser glm47 \
+    --enable-auto-tool-choice \
+    --enable-prefix-caching \
+    --no-enable-flashinfer-autotune
+
+mods:
+  - mods/fix-dsv32-dcp-combine

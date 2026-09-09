@@ -1,0 +1,109 @@
+recipe_version: "1"
+# NOTE 2026-09-09: needs EIGHT nodes. Jeff has 6 (4 here on the switch + 2 direct-connected
+# running GLM-5.3-Flash). TP=6 is NOT possible on this tree: the CUDA DSA path asserts
+# num_heads % tp_size == 0 (64 heads) and the MoE intermediate (2048) does not split by 6; the
+# eldritch fork's virtual-TP head padding does not exist on jovian-judgement. Keep for an 8-node future.
+# 8x DGX Spark: GLM-5.3 743B Int4-Int8Mix on the current b12x stack, TP=8, NO DCP.
+# Written 2026-09-09 from the measured 4-node results:
+#   nightly image, DCP=1: correct output, ~100 ms/step, code 35-37 / prose 25 / count 47 tok/s,
+#   prefill 887 tok/s, RoCEnante one-shot RDMA allreduce confirmed live. Its only limit was
+#   the KV pool (each rank stores the full KV when DCP=1). At TP=8 each rank holds ~52 GB of
+#   weights instead of ~98, so a 36 GB per-rank KV budget (~657K tokens fp8 = the current
+#   production pool, 2 x 327K sessions) fits with ~20 GB to spare. 40 GB (~730K) also fits.
+#
+# BEFORE LAUNCH (per new node):
+#   1. Same RDMA fabric (switch) + fabric IP; passwordless SSH from this head; add the four
+#      IPs to CLUSTER_NODES in ~/spark-vllm-docker/.env (or pass -n with all eight).
+#   2. Interface names must match the launcher args used here: --eth-if enp1s0f0np0
+#      --ib-if mlx5_0,mlx5_2 (run autodiscover.sh if they differ).
+#   3. docker pull eugr/spark-vllm-b12x:nightly-20260908  (24 GB unpacked)
+#   4. Mount the weights read-only the way the workers do:
+#      192.168.177.12:/home/jeff/models -> /home/jeff/models (nfs4). Initial load reads
+#      ~52 GB per node over the fabric.
+#   5. ~/.cache/vllm, ~/.cache/flashinfer, ~/.triton, ~/.tilelang exist; vm.swappiness=10.
+#   6. GID index is computed per node from sysfs (RoCE v2 / IPv4-mapped GID on mlx5_0).
+# Run:
+#   cd ~/spark-vllm-docker && ./run-recipe.py recipes/8x-spark-cluster/glm-53-b12x-tp8.yaml --no-ray
+# Expect: boot log "RoCEnante all-reduce is live: ... world=8"; "GPU KV cache size: ~657,000 tokens".
+# First-boot check: count-to-15 coherent, then bench1.py code/prose/count and bench_long.py.
+name: GLM-5.3-b12x-tp8
+description: "GLM-5.3 743B Int4-Int8Mix, 8x DGX Spark, TP=8 no DCP, B12X sparse MLA, fp8 KV 36 GB/rank (~657K tokens), MTP4, RoCEnante on, 327K ctx, 4 seqs."
+
+model: /models/GLM-5.3-Tech2wild
+cluster_only: true
+container: eugr/spark-vllm-b12x:nightly-20260908
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 8
+  gpu_memory_utilization: 0.88
+  max_model_len: 327680
+  max_num_batched_tokens: 8192
+
+env:
+  NCCL_NET: IB
+  NCCL_IB_DISABLE: "0"
+  NCCL_IB_HCA: "mlx5_0,mlx5_2"
+  NCCL_SOCKET_IFNAME: "enP7s7,enp1s0f0np0,enP2p1s0f0np0"
+  GLOO_SOCKET_IFNAME: "enp1s0f0np0"
+  NCCL_IB_GID_INDEX: "-1"
+  NCCL_MAX_NCHANNELS: "4"
+  NCCL_MIN_NCHANNELS: "4"
+  NCCL_CUMEM_ENABLE: "0"
+  NCCL_CROSS_NIC: "1"
+  NCCL_IGNORE_CPU_AFFINITY: "1"
+  NCCL_BUFFSIZE: "16777216"
+
+  # b12x one-shot RoCE collectives (multi-node TP). HCAs come from NCCL_IB_HCA.
+  VLLM_ENABLE_ROCE_ALLREDUCE: "1"
+  VLLM_ROCE_ALLREDUCE_MAX_SIZE: "2MB"
+  VLLM_ENABLE_PCIE_ALLREDUCE: "0"
+
+  CUTE_DSL_ARCH: "sm_121a"
+  VLLM_USE_V2_MODEL_RUNNER: "1"
+  VLLM_USE_AOT_COMPILE: "1"
+  VLLM_SPARSE_INDEXER_MAX_LOGITS_MB: "256"
+  VLLM_MARLIN_USE_ATOMIC_ADD: "1"
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+  VLLM_WORKER_MULTIPROC_METHOD: "spawn"
+  CUDA_DEVICE_MAX_CONNECTIONS: "32"
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+  OMP_NUM_THREADS: "8"
+  TORCH_CUDA_ARCH_LIST: "12.1a"
+
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+  VLLM_EXECUTE_MODEL_TIMEOUT_SECONDS: "1800"
+
+command: |
+  export B12X_ROCE_GID_INDEX=$(for i in 0 1 2 3 4 5 6 7; do g=$(cat /sys/class/infiniband/mlx5_0/ports/1/gids/$i 2>/dev/null); t=$(cat /sys/class/infiniband/mlx5_0/ports/1/gid_attrs/types/$i 2>/dev/null); case "$g" in *:ffff:*) [ "$t" = "RoCE v2" ] && {{ echo $i; break; }};; esac; done)
+  echo "[recipe] B12X_ROCE_GID_INDEX=$B12X_ROCE_GID_INDEX on $(hostname)"
+  vllm serve /models/GLM-5.3-Tech2wild \
+    --served-model-name glm5.3 \
+    --quantization compressed-tensors \
+    --tensor-parallel-size 8 \
+    --decode-context-parallel-size 1 \
+    --attention-backend B12X \
+    --speculative-config '{{"method":"mtp","num_speculative_tokens":4,"attention_backend":"B12X","quantization":"compressed-tensors"}}' \
+    --kv-cache-dtype fp8_ds_mla \
+    --kv-cache-memory-bytes 36000000000 \
+    --max-model-len 327680 \
+    --max-num-batched-tokens 8192 \
+    --max-num-seqs 4 \
+    --compilation-config '{{"cudagraph_mode":"FULL_AND_PIECEWISE","custom_ops":["all"]}}' \
+    --max-cudagraph-capture-size 32 \
+    --async-scheduling \
+    --long-prefill-token-threshold 2048 \
+    --gpu-memory-utilization 0.88 \
+    --hf-overrides '{{"index_topk_pattern":"FFFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSSFSSS"}}' \
+    --host {host} \
+    --port {port} \
+    --trust-remote-code \
+    --reasoning-parser glm45 \
+    --tool-call-parser glm47 \
+    --enable-auto-tool-choice \
+    --enable-prefix-caching \
+    --no-enable-flashinfer-autotune
+
+mods: []
