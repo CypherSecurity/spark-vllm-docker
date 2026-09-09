@@ -100,3 +100,15 @@ waits for health, runs `parity.py dump <label>`, and stops the cluster.
 `harness/sweep_driver.sh <recipe>...` boots each recipe and appends the benchmark set
 to `sweep_results.md`. Both default `S` (log/output dir) to their own directory and
 export the `-v ~/models:/models` docker arg the recipes rely on.
+
+## systemd unit
+
+`systemd/vllm-glm53.service` runs the production recipe as a service (pre-start waits for
+the worker nodes' SSH, docker and NFS mount of the weights, and removes stale
+`vllm_node` containers). Install:
+
+```
+sudo cp systemd/vllm-glm53.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable vllm-glm53
+sudo systemctl start vllm-glm53      # ~15 min to healthy; journalctl -u vllm-glm53 -f
+```

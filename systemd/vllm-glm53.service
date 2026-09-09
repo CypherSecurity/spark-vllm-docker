@@ -1,0 +1,28 @@
+[Unit]
+Description=vLLM GLM-5.3 743B (4x DGX Spark, TP4+DCP4, b12x nightly + DCP fix mod)
+After=docker.service network-online.target nfs-server.service
+Requires=docker.service
+Wants=network-online.target
+StartLimitIntervalSec=3600
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=jeff
+Group=jeff
+WorkingDirectory=/home/jeff/spark-vllm-docker
+Environment=HOME=/home/jeff
+Environment=HF_HOME=/home/jeff/models
+Environment="VLLM_SPARK_EXTRA_DOCKER_ARGS=-v /home/jeff/models:/models"
+ExecStartPre=/home/jeff/spark-vllm-docker/systemd/wait-for-workers.sh
+ExecStart=/home/jeff/spark-vllm-docker/run-recipe.py recipes/4x-spark-cluster/glm-53-b12x-dcp4-prod --no-ray
+ExecStop=/home/jeff/spark-vllm-docker/launch-cluster.sh stop
+TimeoutStartSec=900
+TimeoutStopSec=300
+Restart=on-failure
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
