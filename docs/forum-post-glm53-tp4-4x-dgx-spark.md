@@ -56,8 +56,7 @@ and (optionally) routes the DCP group's gathers through the b12x RoCE runtime, w
 worth ~5 ms/step. Verified with a 6-layer parity harness (DCP=4 vs DCP=1: prefill top-1
 logprob mean diff 0.02, attention outputs within 0.3%) and then on the full model.
 
-Mod + recipe + harness: `<GITHUB BRANCH URL>` (branch `claude/glm-speed-optimization-911a80`
-of the launcher repo). The kernel change is a few lines and should go upstream.
+Mod + recipe + harness: https://github.com/CypherSecurity/spark-vllm-docker/tree/claude/glm-speed-optimization-911a80. The kernel change is a few lines and should go upstream.
 
 ## Recipe (`recipes/4x-spark-cluster/glm-53-b12x-dcp4-prod`)
 
