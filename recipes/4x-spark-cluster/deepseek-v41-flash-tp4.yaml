@@ -1,0 +1,98 @@
+recipe_version: "1"
+# FIRST BOOT 2026-09-12 (Engram over NFS, no local rows): healthy in 18 min; KV pool 3,199,505 tokens
+# (6.1 x 512K); coherent. Single stream: code 72 / prose 32 / count 88 tok/s, step 63-71 ms,
+# DSpark accept 3.6-3.9 of 5 on code; decode@31K ctx 71.9 tok/s; 31K cold prefill 487 tok/s.
+# Engram row ranges (rank0 .12, rank1 .13, rank2 .11, rank3 .14): layer1 [0,96000564) [96000564,192001740)
+# [192001740,288003654) [288003654,384006168); layer14 [0,96003054) [96003054,192007016)
+# [192007016,288011564) [288011564,384016682). Copies built by ~/dsv41-engram-copy.sh.
+# DeepSeek-V4.1-Flash (552B MoE, MXFP4 experts, Engram-on-disk) on 4x DGX Spark, TP4.
+# Mapped 2026-09-12 from kilork's gist (sm121-launcher recipe dsv41-flash-4x, MIT) which
+# re-expresses tonyd2wild's boot-10 stack as a clone-at-pin image. Build inputs are vendored
+# in docker-images/dsv41-flash (see its README). Their measured numbers on 4 Sparks:
+# 47 tok/s mixed single stream (b12x MoE overlay), 95 tok/s counting, 128K prefill 1.64 s,
+# 512K context, 1.6M-token KV pool. Aiden Le's DCP2 lane on the same stack: 94/64/32 tok/s
+# (code/math/formatted), 185 aggregate at 6 streams, 1.9-2.4K tok/s prefill.
+#
+# BUILD FIRST (needs a maintenance window: FlashInfer + vLLM ext compile peak tens of GB RAM):
+#   cd docker-images/dsv41-flash && ./install.sh                      # -> dsv41-flash:local
+#   docker build -t dsv41-flash-b12x:local -f Dockerfile.b12x .       # + b12x MoE overlay
+#   then docker save | ssh <worker> docker load to the other three nodes.
+# MODEL: HF cache under HF_HOME=/home/jeff/models (launcher mounts it at /root/.cache/huggingface),
+#   revision dba1be0a40aa45a94ad051997016db3960a90277 (the one we downloaded).
+# ENGRAM: first boot reads the two 100 GB Engram shards from NFS (slower decode). Its log prints
+#   "Engram layer N rows [start, end)" per rank; then on each node run
+#   docker-images/dsv41-flash/tools/engram_local.py <snapshot-dir> /var/tmp/engram-local/DeepSeek-V4.1-Flash 1:S:E 14:S:E
+#   and relaunch with VLLM_SPARK_EXTRA_DOCKER_ARGS including
+#   "-v /var/tmp/engram-local/DeepSeek-V4.1-Flash:/engram-local:ro" and DSV41_ENGRAM_LOCAL=1.
+# Differences from the gist: our fabric env (mlx5_0,mlx5_2; GID auto), our launcher's
+# --no-ray multiproc path, served name deepseek-v4.1-flash, thinking OFF by default.
+name: DeepSeek-V4.1-Flash-TP4
+description: "DeepSeek-V4.1-Flash MXFP4 on 4x DGX Spark: TP4, DSpark k=5, Engram-on-disk, 512K ctx (kilork/tonyd2wild stack)"
+
+model: deepseek-ai/DeepSeek-V4.1-Flash
+container: dsv41-flash-b12x:local
+cluster_only: true
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 4
+  gpu_memory_utilization: 0.85
+  max_model_len: 524288
+  max_num_batched_tokens: 8192
+
+env:
+  NCCL_NET: IB
+  NCCL_IB_DISABLE: "0"
+  NCCL_IB_HCA: "mlx5_0,mlx5_2"
+  NCCL_SOCKET_IFNAME: "enP7s7,enp1s0f0np0,enP2p1s0f0np0"
+  GLOO_SOCKET_IFNAME: "enp1s0f0np0"
+  NCCL_IB_GID_INDEX: "-1"
+  NCCL_MAX_NCHANNELS: "4"
+  NCCL_MIN_NCHANNELS: "4"
+  NCCL_CUMEM_ENABLE: "0"
+  NCCL_CROSS_NIC: "1"
+  NCCL_IGNORE_CPU_AFFINITY: "1"
+
+  HF_HUB_OFFLINE: "1"
+  # Engram tables stay on disk; 32 parallel row reads, 16 MB chunks
+  DSV41_ENGRAM_DISK: "1"
+  DSV41_ENGRAM_DISK_THREADS: "32"
+  DSV41_ENGRAM_DISK_CHUNK: "16"
+  # set to "1" + mount /engram-local once the node-local copies exist (see header)
+  DSV41_ENGRAM_LOCAL: "0"
+  DSV41_ENGRAM_DIR: "/engram-local"
+  # CUDA graphs: Engram rows staged in prepare_inputs (baked patch)
+  VLLM_USE_BREAKABLE_CUDAGRAPH: "1"
+  VLLM_HAS_FLASHINFER_CUBIN: "1"
+  VLLM_USE_RUST_FRONTEND: "0"
+  MAX_JOBS: "2"
+  VLLM_ENGINE_READY_TIMEOUT_S: "3600"
+  PYTORCH_CUDA_ALLOC_CONF: expandable_segments:True
+  TORCH_CUDA_ARCH_LIST: "12.1a"
+  FLASHINFER_CUDA_ARCH_LIST: "12.1a"
+  OMP_NUM_THREADS: "2"
+  B12X_CACHE_DIR: /root/.cache/b12x
+
+command: |
+  vllm serve deepseek-ai/DeepSeek-V4.1-Flash \
+    --revision dba1be0a40aa45a94ad051997016db3960a90277 \
+    --served-model-name deepseek-v4.1-flash \
+    --moe-backend b12x \
+    --trust-remote-code \
+    --tensor-parallel-size 4 \
+    --gpu-memory-utilization 0.85 \
+    --max-model-len 524288 \
+    --max-num-seqs 8 \
+    --max-num-batched-tokens 8192 \
+    --block-size 128 \
+    --compilation-config '{{"cudagraph_mode":"FULL_AND_PIECEWISE","cudagraph_capture_sizes":[5,6,10,12,15,18,20,24,25,30,35,36,40,42,48]}}' \
+    --speculative-config '{{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic","rejection_sample_method":"block","enable_adaptive_verification":false}}' \
+    --tool-call-parser deepseek_v41 \
+    --enable-auto-tool-choice \
+    --reasoning-parser deepseek_v41 \
+    --default-chat-template-kwargs '{{"thinking": false}}' \
+    --host {host} \
+    --port {port}
+
+mods: []

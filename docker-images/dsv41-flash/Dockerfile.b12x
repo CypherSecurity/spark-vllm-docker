@@ -1,0 +1,5 @@
+# b12x MoE overlay on the built dsv41-flash:local image (kilork gist, "live configuration").
+# +47.0 vs 39.9 tok/s mixed single stream and 95 vs 71 tok/s counting on 4 Sparks.
+FROM dsv41-flash:local
+RUN pip install --no-cache-dir b12x==1.3.0
+ENV B12X_CACHE_DIR=/root/.cache/b12x

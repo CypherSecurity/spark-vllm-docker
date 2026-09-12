@@ -9,7 +9,7 @@ HEAD=$(grep -E '^LOCAL_IP=' .env | cut -d= -f2)
 deadline=$(( $(date +%s) + ${WAIT_FOR_WORKERS_SECS:-600} ))
 for h in $NODES; do
   [ "$h" = "$HEAD" ] && continue
-  until ssh -o BatchMode=yes -o ConnectTimeout=5 "$h" 'docker info >/dev/null 2>&1 && test -f /home/jeff/models/GLM-5.3-Tech2wild/config.json'; do
+  until ssh -o BatchMode=yes -o ConnectTimeout=5 "$h" 'docker info >/dev/null 2>&1 && test -d /home/jeff/models'; do
     [ $(date +%s) -ge $deadline ] && { echo "worker $h not ready (ssh/docker/NFS) after timeout"; exit 1; }
     echo "waiting for worker $h ..."; sleep 10
   done

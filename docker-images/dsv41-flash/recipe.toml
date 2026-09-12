@@ -1,0 +1,121 @@
+# DeepSeek-V4.1-Flash (552B MoE, MXFP4 experts, Engram-on-disk) — 4x DGX Spark.
+#
+# Image: dsv41-flash:local (docker-images/dsv41-flash/ — tonyd2wild overlay
+# chain as clone-at-pin build: vllm dsv41-feat@e47aa780 + sm121
+# _C_stable_libtorch + FlashInfer 0.7.0rc1 + 7 boot-10 patches baked in,
+# MIT provenance).
+#
+# Model: deepseek-ai/DeepSeek-V4.1-Flash (476 GB on the NFS HF cache,
+# refs/main). The two 203 GB FP8 Engram n-gram tables are NEVER loaded into
+# HBM — the baked engram.py patch keeps them on disk (DSV41_ENGRAM_DISK=1)
+# and reads rows on demand. Node-local sparse copies of each rank's rows
+# (48 GB, engram-local.json) accelerate decode once created (DSV41_ENGRAM_DIR
+# below, added after the copies exist — first boot reads straight from NFS).
+#
+# Config mirrors their boot-10 serving setup (launch/dsv41-tp4.sh) with
+# local deviations:
+#   CUDA graphs FULL_AND_PIECEWISE + exact DSpark capture sizes (no padded
+#   rows — padded speculative batches hang SM120 sparse MLA, FlashInfer
+#   #5015), DSpark k=5 with the checkpoint's own draft layers, tools +
+#   vision on.
+#   * GMU 0.85 (their 0.80): the indexer prefill buffer grows with max
+#     context (~5.2 GiB at 1M, ~2.6 GiB at 512K); the extra budget keeps
+#     the KV pool at ~11 GiB (≈1.6M tokens) with host headroom.
+#   * 512K ctx (2026-09-11, operator): matches the GLM prod convention
+#     (524288) and stays inside the row width their top-k fix was
+#     validated for (300K measured, 1M-wide never re-run even by them).
+#     The 1.6M-token pool gives 3× headroom at 512K.
+#   * thinking ON + reasoning_effort=max by default (request can override
+#     via chat_template_kwargs), served as "deepseek-v4-flash" (gateway
+#     alias, no config churn).
+#
+# Reference: Aiden's write-up of the same stack + their deltas (B12X MoE
+# backend, explicit KV budget, DCP2 port) —
+# https://aidenle.com/recipes/deepseek-v4-1-flash-4x-dgx-spark/
+# (page says production-1.1 in places; the DCP2-baked image is
+# production-1.2 — the page was not updated to the end).
+
+engine = "vllm"
+name = "DeepSeek-V4.1-Flash MXFP4 (dsv41 img, 4x, DSpark k=5, Engram-on-disk)"
+docker_image = "dsv41-flash:local"
+docker_image_dir = "dsv41-flash"
+model = "deepseek-ai/DeepSeek-V4.1-Flash"
+required_nodes = 4
+tensor_parallel_size = 4
+pipeline_parallel_size = 1
+distributed_backend = "mp"
+shm_size = "32gb"
+# NO recipe entrypoint: the base image bakes ENTRYPOINT ["vllm","serve"]
+# (vllm/vllm-openai), so the launcher's CMD (model + flags) completes it.
+
+args = [
+    # Stable gateway alias — clients/gateways keep the DeepSeek-V4-Flash
+    # model name; no per-deployment config churn.
+    "--served-model-name", "deepseek-v4-flash",
+    "--trust-remote-code",
+    "--distributed-executor-backend", "mp",
+    "--gpu-memory-utilization", "0.85",
+    "--max-model-len", "524288",
+    "--max-num-seqs", "8",
+    "--max-num-batched-tokens", "8192",
+    # boot-4 fix: the V4 indexer backend refuses the smallest-listed block
+    "--block-size", "128",
+    # boot-10: exact capture sizes for DSpark k=5, SEQS=8 (multiples of 5
+    # and 6 up to 48 — every decode batch gets an exact FULL graph, no padding)
+    "--compilation-config", """
+'{"cudagraph_mode":"FULL_AND_PIECEWISE","cudagraph_capture_sizes":[5,6,10,12,15,18,20,24,25,30,35,36,40,42,48]}'""",
+    "--speculative-config", """
+'{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic","rejection_sample_method":"block","enable_adaptive_verification":false}'""",
+    "--tool-call-parser", "deepseek_v41",
+    "--enable-auto-tool-choice",
+    "--reasoning-parser", "deepseek_v41",
+    "--default-chat-template-kwargs", """
+'{"thinking": true, "reasoning_effort": "max"}'""",
+]
+
+[env]
+HF_HUB_OFFLINE = "1"
+# Engram tables stay on disk (the baked engram.py patch); 32 parallel row
+# reads, 16 MB chunks (their launch defaults)
+DSV41_ENGRAM_DISK = "1"
+DSV41_ENGRAM_DISK_THREADS = "32"
+DSV41_ENGRAM_DISK_CHUNK = "16"
+# Node-local sparse Engram copy (per-rank row ranges from the first boot's
+# "Engram DISK mode" log lines; built with tools/engram_local.py, verified
+# byte-for-byte). NVMe instead of NFS for the 23.6 GiB/rank tables.
+DSV41_ENGRAM_LOCAL = "1"
+DSV41_ENGRAM_DIR = "/engram-local"
+# CUDA graphs: the Engram rows are staged in prepare_inputs (baked
+# model_state.py prestage patch) so the whole decode step is capturable
+VLLM_USE_BREAKABLE_CUDAGRAPH = "1"
+VLLM_HAS_FLASHINFER_CUBIN = "1"
+VLLM_USE_RUST_FRONTEND = "0"
+# runtime JIT wedge countermeasure (their boot-3 lesson): kernels are
+# prebuilt in the image, but any residual JIT must not OOM the box
+MAX_JOBS = "2"
+VLLM_ENGINE_READY_TIMEOUT_S = "3600"
+PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True"
+TORCH_CUDA_ARCH_LIST = "12.1a"
+FLASHINFER_CUDA_ARCH_LIST = "12.1a"
+OMP_NUM_THREADS = "2"
+
+# Per-node sparse Engram copy (model-00047/00048 shards + engram-local.json)
+[[extra_mounts]]
+host = "/var/tmp/engram-local/DeepSeek-V4.1-Flash"
+container = "/engram-local"
+read_only = true
+
+# JIT caches persist per-node (self-namespace by engine version key; the
+# image prebakes the flashinfer 0.7.0rc1 SM120 kernels, first boots re-JIT
+# the rest)
+[[extra_mounts]]
+host = "~/sm121-cache/jit-121f/flashinfer"
+container = "/root/.cache/flashinfer"
+
+[[extra_mounts]]
+host = "~/sm121-cache/jit-121f/torchinductor"
+container = "/root/.cache/torchinductor"
+
+[[extra_mounts]]
+host = "~/sm121-cache/jit-121f/vllm"
+container = "/root/.cache/vllm"
