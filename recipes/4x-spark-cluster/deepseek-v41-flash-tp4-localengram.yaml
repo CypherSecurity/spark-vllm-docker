@@ -1,4 +1,7 @@
 recipe_version: "1"
+# 2026-09-13: thinking ON by default (reasoning_effort "high" = budget 75/100) so harnesses without a
+# thinking switch still get it. Per-request override: chat_template_kwargs {"thinking": false} or
+# {"reasoning_effort": "low"|"high"|"max"|1-100}; output_config.effort also maps to the budget.
 # MEASURED 2026-09-12 (this recipe, node-local Engram on all 4 ranks): healthy in 14 min; KV pool
 # 3,301,257 tokens (6.3 x 512K); coherent. Single stream: code 73-75 / prose 35 / count 99 tok/s,
 # step 61-67 ms, DSpark accept 3.7-3.9 of 5 on code; decode@31K 73.6; cold prefill 1,542 tok/s @31K
@@ -74,7 +77,7 @@ command: |
     --tool-call-parser deepseek_v41 \
     --enable-auto-tool-choice \
     --reasoning-parser deepseek_v41 \
-    --default-chat-template-kwargs '{{"thinking": false}}' \
+    --default-chat-template-kwargs '{{"thinking": true, "reasoning_effort": "high"}}' \
     --host {host} \
     --port {port}
 
