@@ -1,4 +1,8 @@
 recipe_version: "1"
+# 2026-09-15: --long-prefill-token-threshold 2048 added. Without it one uncached 200K+ prompt takes the
+# whole 8192-token step (~6 s/step at ~1.1-1.3K tok/s prefill), so co-scheduled chats decode at <1 tok/s
+# and new requests queue behind it. Capping a single prefill at 2048 tok/step keeps steps ~1.5 s;
+# total prefill time for the big prompt is unchanged.
 # FIRST BOOT 2026-09-12 (Engram over NFS, no local rows): healthy in 18 min; KV pool 3,199,505 tokens
 # (6.1 x 512K); coherent. Single stream: code 72 / prose 32 / count 88 tok/s, step 63-71 ms,
 # DSpark accept 3.6-3.9 of 5 on code; decode@31K ctx 71.9 tok/s; 31K cold prefill 487 tok/s.
@@ -85,6 +89,7 @@ command: |
     --max-model-len 524288 \
     --max-num-seqs 8 \
     --max-num-batched-tokens 8192 \
+    --long-prefill-token-threshold 2048 \
     --block-size 128 \
     --compilation-config '{{"cudagraph_mode":"FULL_AND_PIECEWISE","cudagraph_capture_sizes":[5,6,10,12,15,18,20,24,25,30,35,36,40,42,48]}}' \
     --speculative-config '{{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic","rejection_sample_method":"block","enable_adaptive_verification":false}}' \

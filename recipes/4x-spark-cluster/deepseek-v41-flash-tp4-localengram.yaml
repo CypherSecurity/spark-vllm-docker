@@ -1,4 +1,8 @@
 recipe_version: "1"
+# 2026-09-15: --long-prefill-token-threshold 2048 added. Without it one uncached 200K+ prompt takes the
+# whole 8192-token step (~6 s/step at ~1.1-1.3K tok/s prefill), so co-scheduled chats decode at <1 tok/s
+# and new requests queue behind it. Capping a single prefill at 2048 tok/step keeps steps ~1.5 s;
+# total prefill time for the big prompt is unchanged.
 # 2026-09-13: thinking ON by default (reasoning_effort "high" = budget 75/100) so harnesses without a
 # thinking switch still get it. Per-request override: chat_template_kwargs {"thinking": false} or
 # {"reasoning_effort": "low"|"high"|"max"|1-100}; output_config.effort also maps to the budget.
@@ -71,6 +75,7 @@ command: |
     --max-model-len 524288 \
     --max-num-seqs 8 \
     --max-num-batched-tokens 8192 \
+    --long-prefill-token-threshold 2048 \
     --block-size 128 \
     --compilation-config '{{"cudagraph_mode":"FULL_AND_PIECEWISE","cudagraph_capture_sizes":[5,6,10,12,15,18,20,24,25,30,35,36,40,42,48]}}' \
     --speculative-config '{{"method":"dspark","num_speculative_tokens":5,"draft_sample_method":"probabilistic","rejection_sample_method":"block","enable_adaptive_verification":false}}' \
