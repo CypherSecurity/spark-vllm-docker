@@ -36,3 +36,21 @@ Containers: `dsv41-head` / `dsv41-worker` (not `vllm_node`).
 ## vLLM baseline with the same script (2026-09-24, `bench_any.py`)
 See `vllm_baseline_20260924.txt`: code 74.4 / prose 32.4 / count 93.0 tok/s, 54K cold prefill
 1,238 tok/s (image pull running concurrently), 8 streams 281 tok/s aggregate (37.6 per stream).
+
+## Trial result (2026-09-25)
+
+Boots 1 and 2 (MAX_RUNNING_REQUESTS=8) hung at decode CUDA-graph capture, bs=6, every time:
+ranks 0/2/3 wait in a torch barrier while rank 1 (gx10253, .13) spins in cuMemcpyDtoHAsync
+(`seq_lens.sum().item()`, deepseek_v4_backend.py:2141) with its GPU idle; host Engram pool and CUDA
+callback threads idle, no Xid, clean RoCE counters. Boot 3 with MAX_RUNNING_REQUESTS=4 (graphs 1-4)
+came up in 12.7 min: KV pool 7,515,648 tokens, 1M context. Also changed: DSPARK_BLOCK_SIZE=5 (their
+issue #20), `--enable-metrics` (issue #12; metric names are `sglang:*`). Do not profile an SPS table
+with Engram (issue #12 / sgl-project/sglang#39173).
+
+| same bench_any.py, client on the head | vLLM (2026-09-24) | SGLang (2026-09-25) |
+|---|---|---|
+| code / prose / count, 1 stream | 74.4 / 32.4 / 93.0 | 63.7 / 27.4-29.9 / 87.7 |
+| 54K cold prefill | 1,238 (image pull running) | 2,263 |
+| same 54K prompt again, TTFT | 37.0 s (re-prefilled) | 0.38 s (cache hit) |
+| concurrency | 8 streams: 281 agg, 37.6 each | 4 streams: 137 agg, 36.2 each |
+| context / KV pool | 512K / 3.3M | 1M / 7.5M |
