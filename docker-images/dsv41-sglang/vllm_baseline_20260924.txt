@@ -1,0 +1,9 @@
+[sanity] prompt=18 out=2 ttft=0.67s wall=0.72s decode=38.7 tok/s e2e=2.8 tok/s
+   answer: '42'
+[code] prompt=47 out=512 ttft=0.29s wall=7.17s decode=74.4 tok/s e2e=71.4 tok/s
+[prose] prompt=21 out=512 ttft=0.28s wall=16.08s decode=32.4 tok/s e2e=31.8 tok/s
+[count] prompt=20 out=300 ttft=0.29s wall=3.52s decode=93.0 tok/s e2e=85.3 tok/s
+[cold-prefill] prompt=53763 out=16 ttft=43.43s wall=43.58s decode=110.8 tok/s e2e=0.4 tok/s
+   cold prefill 1238 tok/s
+[cached-decode] prompt=53763 out=400 ttft=37.03s wall=42.25s decode=76.6 tok/s e2e=9.5 tok/s
+[conc 8] total out=4096 wall=14.6s aggregate=281.3 tok/s  per-stream decode mean=37.6 tok/s
