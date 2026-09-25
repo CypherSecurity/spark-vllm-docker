@@ -1,0 +1,13 @@
+diff --git a/Dockerfile b/Dockerfile
+index 789301a..77c27b8 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -10,6 +10,8 @@ COPY adapter /opt/dsv41/adapter
+ RUN g++ -O2 -Wall -Wextra -Werror -std=c++17 -shared -fPIC -pthread \
+     adapter/row_store.cpp -o adapter/librow_store.so
+ COPY runtime/flash_mla_sm120.py /sgl-workspace/sglang/python/sglang/kernels/ops/attention/flash_mla_sm120.py
++COPY local/anthropic_thinking_compat.py /tmp/anthropic_thinking_compat.py
++RUN python3 /tmp/anthropic_thinking_compat.py
+ COPY boot.py /opt/dsv41/boot.py
+ COPY scripts /opt/dsv41/scripts
+ COPY tests /opt/dsv41/tests

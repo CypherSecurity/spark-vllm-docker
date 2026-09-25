@@ -54,3 +54,15 @@ with Engram (issue #12 / sgl-project/sglang#39173).
 | same 54K prompt again, TTFT | 37.0 s (re-prefilled) | 0.38 s (cache hit) |
 | concurrency | 8 streams: 281 agg, 37.6 each | 4 streams: 137 agg, 36.2 each |
 | context / KV pool | 512K / 3.3M | 1M / 7.5M |
+
+## Local changes (2026-09-25, boot 4)
+
+- `anthropic_thinking_compat.py`, run at image build (Dockerfile.local.diff adds it after the
+  adapter copy): `/v1/messages` accepts `{"thinking": {"type": "enabled"}}` with no budget
+  (Z.ai/GLM clients such as zcode), raises budgets below 1024 to 1024, and drops
+  `redacted_thinking` history blocks instead of returning 400. The backend never enforced the
+  budget anyway. Copy it to `~/dsv41-sglang/local/` before `./start-tp4.sh build`.
+- `DSV41_CACHE_GIB=4`: 4 GiB Engram row cache per node (host RAM). Their issue #21 measured
+  +16-42% prefill on repetitive text at 8 GiB, ~0 on random text; logs are repetitive.
+- Still `MAX_RUNNING_REQUESTS=4` (capture hang at bs=6 with 8).
+- Note: `/v1/messages` without a `thinking` field runs with thinking OFF (vLLM defaulted on).
