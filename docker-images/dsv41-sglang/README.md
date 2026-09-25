@@ -79,3 +79,9 @@ with Engram (issue #12 / sgl-project/sglang#39173).
   Server stayed healthy. Head idle MemAvailable afterwards 7.6 GB (14.3 before the test).
 - Practical ceiling with this profile: 512K. The Engram cache takes ~4 GB of the head's headroom for no
   measured speed gain; setting DSV41_CACHE_GIB=0 is the first lever to raise the ceiling.
+
+## Boot 5 (2026-09-25): Engram cache off again
+
+DSV41_CACHE_GIB=0. KV pool 7,057,920 tokens (the budget is computed from MemAvailable at load, so it
+varies by a few percent between boots). Idle free memory: head 14.4 GB, workers 16.3-18.2 GB. Thinking fix
+still active. zcode context setting: 512K.
