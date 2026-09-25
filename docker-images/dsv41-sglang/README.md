@@ -66,3 +66,16 @@ with Engram (issue #12 / sgl-project/sglang#39173).
   +16-42% prefill on repetitive text at 8 GiB, ~0 on random text; logs are repetitive.
 - Still `MAX_RUNNING_REQUESTS=4` (capture hang at bs=6 with 8).
 - Note: `/v1/messages` without a `thinking` field runs with thinking OFF (vLLM defaulted on).
+
+## Boot 4 checks (2026-09-25): thinking fix, Engram cache, long context
+
+- zcode-style `{"thinking": {"type": "enabled"}}` and redacted-thinking history now return 200.
+- KV pool 7,424,512 tokens (7,515,648 without the Engram cache).
+- Engram cache 4 GiB/node: 74.5% hit rate on real journal text, but no prefill gain: logs 2,101-2,103
+  tok/s at 84-88K tokens, random words 2,243 at 54K (2,263 without the cache). Compute-bound, not NVMe.
+- Staged needle test (`staged_ctx.py`, 4-node MemAvailable guard at 3 GB, aborts via /abort_request):
+  256K PASS 1,683 tok/s (head min 8.7 GB); 512K PASS 1,309 tok/s (head min 5.1 GB);
+  900K aborted by the guard at ~767K prefilled tokens, head 2.55 GB, prefill down to ~700 tok/s.
+  Server stayed healthy. Head idle MemAvailable afterwards 7.6 GB (14.3 before the test).
+- Practical ceiling with this profile: 512K. The Engram cache takes ~4 GB of the head's headroom for no
+  measured speed gain; setting DSV41_CACHE_GIB=0 is the first lever to raise the ceiling.
