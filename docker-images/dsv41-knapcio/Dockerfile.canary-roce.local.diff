@@ -1,0 +1,13 @@
+diff --git a/Dockerfile.canary-roce b/Dockerfile.canary-roce
+index 249c2bb..738fe81 100644
+--- a/Dockerfile.canary-roce
++++ b/Dockerfile.canary-roce
+@@ -12,6 +12,8 @@ ARG PIP_INDEX=https://pypi.org/simple
+ RUN pip install --no-deps --no-cache-dir -i "$PIP_INDEX" "sglang-kernel==0.4.7" "sgl-deep-gemm==0.2.0"
+ RUN rm -rf /sgl-workspace/sglang/python
+ COPY runtime/sglang-canary/python /sgl-workspace/sglang/python
++COPY local/anthropic_thinking_compat.py /tmp/anthropic_thinking_compat.py
++RUN python3 /tmp/anthropic_thinking_compat.py
+ RUN python3 -c "import sglang, sglang.srt.models.deepseek_v4, sglang.srt.layers.attention.deepseek_v4_backend, sglang.srt.models.deepseek_v4_dspark; print('import ok')"
+ # RoCEnante overlay (SG17, rhys101) applied to the branch tree with offsets, then adapted to TP4
+ COPY runtime/sglang-rocenante.patch runtime/roce_tp4_adapt.py /tmp/

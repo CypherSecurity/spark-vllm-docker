@@ -1,0 +1,6 @@
+[256K] prompt_tokens=255345 ttft=56.8s wall=57s prefill=4496 tok/s needle=PASS answer='396072' err=None
+   min MemAvailable GB: head=8.5, 13=10.2, 11=11.0, 14=10.9
+[512K] prompt_tokens=510370 ttft=135.2s wall=135s prefill=3776 tok/s needle=PASS answer='674995' err=None
+   min MemAvailable GB: head=4.6, 13=6.0, 11=6.8, 14=6.7
+[900K] prompt_tokens=896401 ttft=279.8s wall=280s prefill=3203 tok/s needle=PASS answer='111418' err=None
+   min MemAvailable GB: head=3.1, 13=4.2, 11=5.5, 14=5.6

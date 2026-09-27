@@ -26,3 +26,23 @@ Steps once GLM is stopped:
 
 Expected boot lines (their README): shared-expert padding K 576->640, indexer chunked ARMED,
 `gamma=5`, `max_running_requests=16`, `RoCEnante ready: world=4`, `[moe_b12x_next] armed`.
+
+## Results (2026-09-27, client on the head, same scripts as ../dsv41-sglang)
+
+Boot: ready in 6 min; all profile lines present (RoCEnante world=4 on mlx5_0,mlx5_2, b12x_next EP1,
+indexer chunked, gamma=5, spec_sync_free, eager_glue, replicated_split); graphs to bs 16, no capture
+hang. KV pool 6,469,120 tokens. Idle free memory: head 13.6 GB, workers 15-16 GB.
+
+| | vLLM | MiaAI-Lab SGLang | knapcio v2.2 |
+|---|---|---|---|
+| code / prose / count, 1 stream | 74.4 / 32.4 / 93.0 | 63.7 / 27-30 / 87.7 | 114.7-119.1 / 59.2-61.3 / 156-162 |
+| cold prefill 54K random words | 1,238 | 2,263 | 4,450 |
+| cold prefill 84-88K journal logs | - | 2,101-2,103 | 4,448-4,910 |
+| 4 / 8 / 16 streams aggregate | - / 281 / - | 137 / - / - | 241 / 369 / 516 |
+| needle 256K / 512K / 900K | - | PASS / PASS / aborted at 767K | PASS 4,496 / PASS 3,776 / PASS 3,203 tok/s |
+| head min free at 900K | - | 2.6 GB (guard) | 3.1 GB |
+
+900K passed with only 3.1 GB left on the head (guard at 3.0): the ceiling is between 900K and 1M, so
+keep clients at 512K-640K. Anthropic thinking patch (../dsv41-sglang/anthropic_thinking_compat.py)
+added to Dockerfile.canary-roce after the SGLang tree copy (see the .local.diff): f80c91a4b has the
+same strict validator.
