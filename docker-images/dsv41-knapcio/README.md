@@ -46,3 +46,10 @@ hang. KV pool 6,469,120 tokens. Idle free memory: head 13.6 GB, workers 15-16 GB
 keep clients at 512K-640K. Anthropic thinking patch (../dsv41-sglang/anthropic_thinking_compat.py)
 added to Dockerfile.canary-roce after the SGLang tree copy (see the .local.diff): f80c91a4b has the
 same strict validator.
+
+## systemd
+
+`systemd/sglang-dsv41.service` (Type=oneshot + RemainAfterExit: `start-tp4.sh serve` returns once the API is up;
+`stop` tears down all four nodes). Conflicts with vllm-glm53 and vllm-dsv41. Pre-start is the shared
+`systemd/wait-for-workers.sh` with `REQUIRE_PATH=/home/jeff/models/dsv41-flat/config.json`. Head log:
+`journalctl -u sglang-dsv41` for the launcher, `docker logs -f dsv41-head` for the engine.

@@ -1,0 +1,35 @@
+[Unit]
+Description=SGLang DeepSeek-V4.1-Flash (4x DGX Spark, knapcio v2.2 TP4 profile)
+Documentation=file:///home/jeff/spark-vllm-docker/docker-images/dsv41-knapcio/README.md
+After=docker.service network-online.target nfs-server.service
+Requires=docker.service
+Wants=network-online.target
+# Only one model can own the four GPUs; starting this stops the others and vice versa.
+Conflicts=vllm-glm53.service vllm-dsv41.service
+StartLimitIntervalSec=7200
+StartLimitBurst=3
+
+[Service]
+# start-tp4.sh serve returns once the API is up (smoke test + warm-up passed) and leaves the
+# dsv41-head/dsv41-worker containers running; stop tears them down on all four nodes.
+Type=oneshot
+RemainAfterExit=yes
+User=jeff
+Group=jeff
+WorkingDirectory=/home/jeff/dsv41-knapcio
+Environment=HOME=/home/jeff
+Environment=REQUIRE_PATH=/home/jeff/models/dsv41-flat/config.json
+# serve waits READY_TIMEOUT x 10 s for the engine (boots take 5-13 min)
+Environment=READY_TIMEOUT=240
+ExecStartPre=/home/jeff/spark-vllm-docker/systemd/wait-for-workers.sh
+ExecStart=/home/jeff/dsv41-knapcio/start-tp4.sh serve
+ExecStop=/home/jeff/dsv41-knapcio/start-tp4.sh stop
+TimeoutStartSec=3600
+TimeoutStopSec=300
+Restart=on-failure
+RestartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
