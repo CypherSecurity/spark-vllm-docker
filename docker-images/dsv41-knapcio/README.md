@@ -53,3 +53,11 @@ same strict validator.
 `stop` tears down all four nodes). Conflicts with vllm-glm53 and vllm-dsv41. Pre-start is the shared
 `systemd/wait-for-workers.sh` with `REQUIRE_PATH=/home/jeff/models/dsv41-flat/config.json`. Head log:
 `journalctl -u sglang-dsv41` for the launcher, `docker logs -f dsv41-head` for the engine.
+
+## v2.3 upgrade (2026-09-30, 58f2321)
+
+Built while v2.2 served (head had 8.7 GB free); downtime 4 min (stop 23:32:03, ready 23:36:11).
+Certified LM head armed (M 6..48), replay guard on: `/v1/completions` with echo+logprobs now returns 400
+and the engine stays up (v2.2 crashed all four ranks). Thinking patch reapplied after the SGLang tree copy.
+KV 6,601,472. Same scripts: code 115.8-118.1 / prose 60.0-61.8 / count 154.7-160.5, 54K cold prefill 4,810,
+16 streams 494 aggregate (one run; v2.2 516). Within noise of v2.2 as expected.

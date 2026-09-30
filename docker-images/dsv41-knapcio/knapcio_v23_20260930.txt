@@ -1,0 +1,10 @@
+[code] prompt=47 out=512 ttft=0.27s wall=4.69s decode=115.8 tok/s e2e=109.1 tok/s
+[prose] prompt=21 out=512 ttft=0.26s wall=8.79s decode=60.0 tok/s e2e=58.3 tok/s
+[count] prompt=20 out=300 ttft=0.25s wall=2.19s decode=154.7 tok/s e2e=137.0 tok/s
+[code] prompt=47 out=512 ttft=0.20s wall=4.54s decode=118.1 tok/s e2e=112.8 tok/s
+[prose] prompt=21 out=512 ttft=0.22s wall=8.51s decode=61.8 tok/s e2e=60.2 tok/s
+[count] prompt=20 out=300 ttft=0.20s wall=2.07s decode=160.5 tok/s e2e=144.7 tok/s
+[cold-prefill] prompt=53381 out=16 ttft=11.10s wall=11.23s decode=119.7 tok/s e2e=1.4 tok/s
+   cold prefill 4810 tok/s
+[cached-decode] prompt=53381 out=400 ttft=0.36s wall=3.83s decode=115.3 tok/s e2e=104.4 tok/s
+[conc 16] total out=8192 wall=16.6s aggregate=493.6 tok/s  per-stream decode mean=34.0 tok/s

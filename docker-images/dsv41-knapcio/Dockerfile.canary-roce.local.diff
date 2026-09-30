@@ -1,5 +1,5 @@
 diff --git a/Dockerfile.canary-roce b/Dockerfile.canary-roce
-index 249c2bb..738fe81 100644
+index 8e6f30f..c5c6032 100644
 --- a/Dockerfile.canary-roce
 +++ b/Dockerfile.canary-roce
 @@ -12,6 +12,8 @@ ARG PIP_INDEX=https://pypi.org/simple
