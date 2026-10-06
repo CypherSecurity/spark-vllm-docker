@@ -81,3 +81,8 @@ finishes (short chat TTFT 35.6 s behind a 199K prefill) and (b) requests already
   session re-prefills its context.
 - `local/restart_when_idle.sh`: restarts only after 90 s without real batches (ignores the 1-token
   health probes every ~15 s).
+
+Clean re-run (2026-10-06 23:58, no other clients): 199K cold prefill 47.0 s (43.6 s stock); a running generation
+kept streaming at ~1/10 of its idle rate (116 SSE chunks in 47 s vs 107 in the 4 s before; longest gap 1.0 s);
+a new short chat sent 8 s into the prefill: TTFT 1.4 s, complete in 1.5 s (stock: TTFT 35.6 s, complete 37.1 s).
+Raising --prefill-decode-interval trades prefill speed for faster running generations.
