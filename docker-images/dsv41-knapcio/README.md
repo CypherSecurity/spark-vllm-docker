@@ -61,3 +61,23 @@ Certified LM head armed (M 6..48), replay guard on: `/v1/completions` with echo+
 and the engine stays up (v2.2 crashed all four ranks). Thinking patch reapplied after the SGLang tree copy.
 KV 6,601,472. Same scripts: code 115.8-118.1 / prose 60.0-61.8 / count 154.7-160.5, 54K cold prefill 4,810,
 16 streams 494 aggregate (one run; v2.2 516). Within noise of v2.2 as expected.
+
+## Local scheduler changes (2026-10-06, knapcio#9)
+
+Problem, measured here: while a long prompt is mid-chunk, (a) a new request is not admitted until it
+finishes (short chat TTFT 35.6 s behind a 199K prefill) and (b) requests already generating freeze
+(stock SGLang always runs a pending prefill chunk before decode).
+
+- `local/prefill_bypass.py` (loaded via adapter/sitecustomize.py on `sglang.srt.managers.schedule_policy`,
+  `DSV41_PREFILL_BYPASS=4096`): while the chunked prefill continues, waiting requests get an extra
+  4096 tokens of chunk budget per pass, admitted only if they fit whole (a second chunked request
+  would trip `assert self.chunked_req is None`). Stock memory admission unchanged; deterministic, so
+  every TP rank builds the same batch. Tested in the image build (`tests/test_prefill_bypass.py`).
+  Result: short chat TTFT 35.6 s -> 3.3 s; the 199K prefill 43.6 s -> 45.1 s.
+- `--prefill-decode-interval 2` (stock SGLang option, default 0): two decode steps after each prefill
+  chunk, so running generations keep streaming (max gap 1.4 s observed during a long prefill).
+- Known gap: with two long cold prompts queued, a short request behind the second still waits
+  (FCFS loop stops at the first refused candidate). Mostly seen right after a restart, when every
+  session re-prefills its context.
+- `local/restart_when_idle.sh`: restarts only after 90 s without real batches (ignores the 1-token
+  health probes every ~15 s).

@@ -1,0 +1,47 @@
+diff --git a/Dockerfile.canary-roce b/Dockerfile.canary-roce
+index 8e6f30f..f75c6bf 100644
+--- a/Dockerfile.canary-roce
++++ b/Dockerfile.canary-roce
+@@ -12,6 +12,8 @@ ARG PIP_INDEX=https://pypi.org/simple
+ RUN pip install --no-deps --no-cache-dir -i "$PIP_INDEX" "sglang-kernel==0.4.7" "sgl-deep-gemm==0.2.0"
+ RUN rm -rf /sgl-workspace/sglang/python
+ COPY runtime/sglang-canary/python /sgl-workspace/sglang/python
++COPY local/anthropic_thinking_compat.py /tmp/anthropic_thinking_compat.py
++RUN python3 /tmp/anthropic_thinking_compat.py
+ RUN python3 -c "import sglang, sglang.srt.models.deepseek_v4, sglang.srt.layers.attention.deepseek_v4_backend, sglang.srt.models.deepseek_v4_dspark; print('import ok')"
+ # RoCEnante overlay (SG17, rhys101) applied to the branch tree with offsets, then adapted to TP4
+ COPY runtime/sglang-rocenante.patch runtime/roce_tp4_adapt.py /tmp/
+@@ -55,6 +57,8 @@ RUN PYTHONPATH=/opt/dsv41/adapter python3 /opt/dsv41/tests/test_thinking_alias.p
+  && CUDA_VISIBLE_DEVICES= PYTHONPATH=/opt/dsv41/adapter python3 /opt/dsv41/tests/test_spec_sync_free.py \
+  && CUDA_VISIBLE_DEVICES= python3 /opt/dsv41/tests/test_roce_ring.py \
+  && cd /opt/dsv41/tests && CUDA_VISIBLE_DEVICES= PYTHONPATH=/opt/dsv41/adapter python3 test_indexer_chunked_v3.py /sgl-workspace/sglang/python/sglang/srt/layers/attention/deepseek_v4_backend.py
++# local (knapcio#9): scheduler bypass for short requests beside a chunked prefill
++RUN DSV41_PREFILL_BYPASS=4096 CUDA_VISIBLE_DEVICES= PYTHONPATH=/opt/dsv41/adapter python3 /opt/dsv41/tests/test_prefill_bypass.py
+ ENV PYTHONPATH=/opt/dsv41/adapter:/opt/b12x:/opt/b12x_next \
+     MODEL_PATH=/models/DeepSeek-V4.1-Flash \
+     STATE_PATH=/state OFFLOAD_MODE=nvme DSV41_CACHE_GIB=16
+diff --git a/adapter/sitecustomize.py b/adapter/sitecustomize.py
+index 0409215..b921842 100644
+--- a/adapter/sitecustomize.py
++++ b/adapter/sitecustomize.py
+@@ -242,6 +242,12 @@ class EngramLoader(importlib.abc.Loader):
+         elif module.__name__ == 'sglang.srt.managers.schedule_batch':
+             from loop_abort import install as install_loop_abort
+             install_loop_abort(module)
++        elif module.__name__ == 'sglang.srt.managers.schedule_policy':
++            # Local (knapcio#9): gated on DSV41_PREFILL_BYPASS=<tokens>; short requests that fit
++            # whole are admitted beside an in-flight chunked prefill (adapter/prefill_bypass.py).
++            if os.environ.get('DSV41_PREFILL_BYPASS', '').strip().lower() not in ('', '0', 'off', 'false', 'no'):
++                from prefill_bypass import install as install_prefill_bypass
++                install_prefill_bypass(module)
+         else:
+             # V4.1 ratio-1/2 indexers always call the FP4 DeepGEMM kernel.
+             # SM120 needs its split-128 planner even when the legacy FP8
+@@ -272,6 +278,7 @@ class EngramFinder(importlib.abc.MetaPathFinder):
+                             'sglang.srt.speculative.dspark_components.dspark_draft_sampler',
+                             'sglang.kernels.ops.speculative.dspark.dspark_accept',
+                             'sglang.srt.managers.schedule_batch',
++                            'sglang.srt.managers.schedule_policy',
+                             'sglang.srt.managers.tokenizer_manager',
+                             'sglang.kernels.ops.moe.moe_fused_gate',
+                             'sglang.srt.speculative.dspark_components.dspark_draft',
