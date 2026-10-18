@@ -86,3 +86,12 @@ Clean re-run (2026-10-06 23:58, no other clients): 199K cold prefill 47.0 s (43.
 kept streaming at ~1/10 of its idle rate (116 SSE chunks in 47 s vs 107 in the 4 s before; longest gap 1.0 s);
 a new short chat sent 8 s into the prefill: TTFT 1.4 s, complete in 1.5 s (stock: TTFT 35.6 s, complete 37.1 s).
 Raising --prefill-decode-interval trades prefill speed for faster running generations.
+
+## DeepSeek-V4.1-Flash-1017 (2026-10-18)
+
+Revision 1bae0e10. Same config.json and weight index as the original; all 48 shards new (510 GB), including
+the Engram shards, so it has its own hard-linked folder (/home/jeff/models/dsv41-1017-flat), worker volume
+(dsv41-weights-1017) and packed Engram rows (~/dsv41-engram-1017 on every node, 10 min to pack). Encoder:
+special tokens, templates and all five reference prompts identical; the 31 changed lines only assemble
+images inside tool results. Same image, no rebuild. `env.tp4-1017` = 1017, `env.tp4-0910` = original;
+`local/swap_to_1017.sh` swaps at the next 90 s quiet moment. Rollback: cp .env.tp4-0910 .env.tp4, restart.
