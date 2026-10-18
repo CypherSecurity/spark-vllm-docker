@@ -99,3 +99,12 @@ images inside tool results. Same image, no rebuild. `env.tp4-1017` = 1017, `env.
 Serving 1017 since 2026-10-18 20:15 (swap down 20:10:34; KV 6,679,040). Same scripts: code 97.8 (first run after boot) / 126.0,
 prose 61.1-62.5, count 158-161 tok/s; 54K cold prefill 4,343; 16 streams 507 agg; during a 199K prefill (53.5 s) a running
 generation kept streaming (max gap 1.7 s) and a new short chat answered in 2.4 s. Thinking via /v1/messages OK.
+
+## Prompt-encoding check (2026-10-18, 1017)
+
+No Jinja template ships; SGLang selects its own V4.1 encoder (`--tool-call-parser deepseekv41` -> spec "dsv41").
+`encoding-check/run.sh`: SGLang encoder == DeepSeek golden prompts 5/5 as served (stock SGLang 4/5: default
+effort 50 vs the publisher 75, fixed by the adapter). Live prompt token counts == reference for chat, thinking,
+explicit effort, tools, thinking+tools and multi-turn thinking history, on both /v1/chat/completions and
+/v1/messages. Only non-client shapes differ (tools attached inside a message get pydantic key order + strict:false;
+DeepSeek `task`/`mask` fields). Reply cap raised to 131072 (DSV41_MAX_NEW_TOKENS) per the 1017 card (max_tokens >= 256K).
