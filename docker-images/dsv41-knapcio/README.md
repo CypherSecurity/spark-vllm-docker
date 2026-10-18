@@ -95,3 +95,7 @@ the Engram shards, so it has its own hard-linked folder (/home/jeff/models/dsv41
 special tokens, templates and all five reference prompts identical; the 31 changed lines only assemble
 images inside tool results. Same image, no rebuild. `env.tp4-1017` = 1017, `env.tp4-0910` = original;
 `local/swap_to_1017.sh` swaps at the next 90 s quiet moment. Rollback: cp .env.tp4-0910 .env.tp4, restart.
+
+Serving 1017 since 2026-10-18 20:15 (swap down 20:10:34; KV 6,679,040). Same scripts: code 97.8 (first run after boot) / 126.0,
+prose 61.1-62.5, count 158-161 tok/s; 54K cold prefill 4,343; 16 streams 507 agg; during a 199K prefill (53.5 s) a running
+generation kept streaming (max gap 1.7 s) and a new short chat answered in 2.4 s. Thinking via /v1/messages OK.

@@ -1,0 +1,15 @@
+[sanity] prompt=18 out=2 ttft=0.21s wall=0.25s decode=55.9 tok/s e2e=8.0 tok/s
+   answer: '42'
+[code] prompt=47 out=512 ttft=0.30s wall=5.53s decode=97.8 tok/s e2e=92.5 tok/s
+[prose] prompt=21 out=512 ttft=0.26s wall=8.64s decode=61.1 tok/s e2e=59.3 tok/s
+[count] prompt=20 out=300 ttft=0.26s wall=2.16s decode=158.0 tok/s e2e=139.0 tok/s
+[code] prompt=47 out=512 ttft=0.21s wall=4.27s decode=126.0 tok/s e2e=120.0 tok/s
+[prose] prompt=21 out=512 ttft=0.22s wall=8.41s decode=62.5 tok/s e2e=60.9 tok/s
+[count] prompt=20 out=300 ttft=0.21s wall=2.07s decode=161.3 tok/s e2e=145.3 tok/s
+[cold-prefill] prompt=53654 out=16 ttft=12.35s wall=12.52s decode=97.5 tok/s e2e=1.3 tok/s
+   cold prefill 4343 tok/s
+[cached-decode] prompt=53654 out=400 ttft=0.39s wall=3.94s decode=112.6 tok/s e2e=101.4 tok/s
+[conc 16] total out=8192 wall=16.2s aggregate=507.2 tok/s  per-stream decode mean=34.9 tok/s
+long prefill: 199185 tokens in 53.5 s
+running generation: 111 chunks in the 4.0 s before, 148 chunks during the 53.5 s prefill (longest gap 1.7 s)
+new short chat: TTFT 2.3 s, finished 2.4 s after sending
