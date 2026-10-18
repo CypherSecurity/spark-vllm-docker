@@ -18,7 +18,7 @@ User=jeff
 Group=jeff
 WorkingDirectory=/home/jeff/dsv41-knapcio
 Environment=HOME=/home/jeff
-Environment=REQUIRE_PATH=/home/jeff/models/dsv41-flat/config.json
+Environment=REQUIRE_PATH=/home/jeff/models/dsv41-1017-flat/config.json
 # serve waits READY_TIMEOUT x 10 s for the engine (boots take 5-13 min)
 Environment=READY_TIMEOUT=240
 ExecStartPre=/home/jeff/spark-vllm-docker/systemd/wait-for-workers.sh
