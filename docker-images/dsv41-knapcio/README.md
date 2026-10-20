@@ -108,3 +108,11 @@ effort 50 vs the publisher 75, fixed by the adapter). Live prompt token counts =
 explicit effort, tools, thinking+tools and multi-turn thinking history, on both /v1/chat/completions and
 /v1/messages. Only non-client shapes differ (tools attached inside a message get pydantic key order + strict:false;
 DeepSeek `task`/`mask` fields). Reply cap raised to 131072 (DSV41_MAX_NEW_TOKENS) per the 1017 card (max_tokens >= 256K).
+
+## SWA pool for several long sessions (2026-10-20)
+
+Symptom: 91 cold prefills >= 60K tokens in two days (many 290-420K, 70-110 s), in pairs minutes apart = two long
+sessions evicting each other. Cause: the SWA sub-pool is cap-sized (prefix_tails = 4 x max_running_requests = 64,
+swa=51,712 tokens) while a ~400K session needs a few hundred tails. Fix (MiaAI-Lab docs, issues #27/#43):
+`--swa-full-tokens-ratio 0.065` in EXTRA_SGLANG_ARGS -> swa=243,200, full pool 6,504,704 -> 3,742,720 tokens.
+Not using knapcio v2.4 `--swa-prefix-tails 128` (prime suspect in knapcio#16 crashes). Test: `local/revisit2.py`.
