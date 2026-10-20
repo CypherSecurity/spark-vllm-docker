@@ -116,3 +116,5 @@ sessions evicting each other. Cause: the SWA sub-pool is cap-sized (prefix_tails
 swa=51,712 tokens) while a ~400K session needs a few hundred tails. Fix (MiaAI-Lab docs, issues #27/#43):
 `--swa-full-tokens-ratio 0.065` in EXTRA_SGLANG_ARGS -> swa=243,200, full pool 6,504,704 -> 3,742,720 tokens.
 Not using knapcio v2.4 `--swa-prefix-tails 128` (prime suspect in knapcio#16 crashes). Test: `local/revisit2.py`.
+Result (2026-10-20 22:53, no other clients): sessions A and B loaded cold (299K tokens each, 69.0 / 68.6 s); revisits
+after both were loaded: A 99.9% cached, 1.0 s; B 99.9% cached, 1.0 s. Head free after: 11.1 GB. Xid since restart: 0.
